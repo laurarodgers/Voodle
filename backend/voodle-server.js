@@ -17,7 +17,7 @@ var recHandler = new Recorder();
 // Globals
 
 var parameters = {
-	smoothValue: 0.8, 
+	smoothValue: 0.8,
 	gain_for_amp: 0.4,
 	gain_for_pitch: 0.6,
 	scaleFactor: 3,
@@ -65,12 +65,13 @@ var last = new Date() //imposes a framerate with `var now`
 var recording = false
 var name;
 
+var positionBuffer = [];
 ///////////////////////////////////////////////////////////////////
 // Main
 function main() {
 	//set up server
 	server.listen(2000);
-	
+
 
 	app.use(express.static(__dirname + '/js'));
 
@@ -140,7 +141,7 @@ function main() {
 				console.log("\nnew min motor speed: "+ parameters.motorMinSpeed)
 				parameters.motorMinSpeed = data.motorMin;
 			}
-	 
+
 	  });
 	  	socket.on("startRec",function(){
 	  		startRecording()
@@ -157,7 +158,7 @@ function main() {
 	  	socket.on("exportParams", function(){
 	  		var time = new Date().getTime();
 	  		bigFatParametersList = "";
-	  		
+
 	  		for (key in parameters) {
 	  			console.log(key);
 	  			console.log(parameters[key])
@@ -193,7 +194,7 @@ function main() {
 		board.repl.inject({
 	    motor: motor
 	    });
-	    motorCreated=true;	
+	    motorCreated=true;
 	};
 	if (ledMode){
 		//constructs an RGB LED
@@ -246,7 +247,7 @@ function startRecording(){
 function stopRecording(){
 	recording = false;
 	writeParams();
-	
+
 }
 
 function writeParams(){
@@ -275,11 +276,11 @@ function processAudio( inputBuffer ) {
 	var now = new Date()
 	handleRecording(inputBuffer[0])
 	//vars `now` and `last` ensures it runs at 30fps
-	if ((now-last)>parameters.frameRate){	
+	if ((now-last)>parameters.frameRate){
 
 		ampRaw = Math.abs(Math.max.apply(Math, inputBuffer[0]));
-		
-		//start of pitch analysis///////////////////////////////////////////		
+
+		//start of pitch analysis///////////////////////////////////////////
 		pitch = detectPitchAMDF(inputBuffer[0]);
 		if (pitch==null){
 			pitch = 0
@@ -287,22 +288,22 @@ function processAudio( inputBuffer ) {
 		else{
 			pitch = mapValue(pitch, 0,1000,0,1)
 		}
-	
+
 		//end of pitch analysis///////////////////////////////////////////
-		
+
 		//mixes amplitude and frequency, while scaling it up by scaleFactor.
 		var ampPitchMix = (parameters.gain_for_amp * ampRaw + parameters.gain_for_pitch * pitch) * parameters.scaleFactor;
-		
+
 		//smooths values
 		//Note: smoothValue is a number between 0-1
 		smoothOut = parameters.smoothValue * smoothOut + (1 - parameters.smoothValue) * ampPitchMix;
-		
+
 		//writes values to arduino
 		setArduino(smoothOut);
 
 		//resets timer to impose a framerate
 		last = now;
-		
+
 		//broadcasts values to frontend
 		if(parameters.on){
 				broadcastValues();
@@ -337,9 +338,9 @@ function broadcastValues() {
 		// iohandle.broadcastPitch(pitchGain);
 		// iohandle.broadcastMix(smoothOut);
 		// iohandle.broadcastAmpGain(parameters.gain_for_amp)
-		// iohandle.broadcastPitchGain(parameters.gain_for_pitch) 
+		// iohandle.broadcastPitchGain(parameters.gain_for_pitch)
 		// iohandle.broadcastScale(parameters.scaleFactor);
-		
+
 }
 
 
@@ -364,14 +365,22 @@ function setArduino(sm) {
 		if (parameters.reverse){
 		//maps the audio input to the servo value range, and calculates the difference
 		//so that it moves upwards with increased amplitude.
-			servo.to(parameters.servoMax - mapValue(sm, 0, 1, parameters.servoMin, parameters.servoMax));
+			let servoPosition = parameters.servoMax - mapValue(sm, 0, 1, parameters.servoMin, parameters.servoMax);
+			servo.to(servoPosition);
+			handleLogPosition(servoPosition);
+			//servo.to(parameters.servoMax - mapValue(sm, 0, 1, parameters.servoMin, parameters.servoMax));
+
 		}
 		else {
-				servo.to(mapValue(sm, 0, 1, parameters.servoMin, parameters.servoMax));
+			let servoPosition = mapValue(sm, 0, 1, parameters.servoMin, parameters.servoMax);
+			servo.to(servoPosition);
+			handleLogPosition(servoPosition);
+				//servo.to(mapValue(sm, 0, 1, parameters.servoMin, parameters.servoMax));
 			}
 	};
 	if(motorCreated){
 		if (parameters.reverse){
+			//let motorPosition = 
 			motor.reverse(mapValue(sm, 0, 1, parameters.motorMinSpeed, parameters.motorMaxSpeed));
 		}
 		else {
@@ -382,7 +391,23 @@ function setArduino(sm) {
 		n = mapValue(sm, 0, 1, 0, 255)
 	    led.color(n,0,n);
   	};
+
+
+		//handleLogPosition(pos);
 };
+
+function handleLogPosition(pos) {
+	if(positionBuffer.length < 1000) {
+			positionBuffer.push(pos:pos, t:Date.now());
+			positionBuffer.push(",");
+			//pos:pos, t:theetime()
+	} else {
+		fs.appendFile(thepath + name + "timelog.csv", positionBuffer, function(err));
+		///fs.appendFile("C:\\Users\\David\\Documents\\CuddleBitV2\\recordings\\" + name + "_parameters.json", JSON.stringify(parameters), function(err){
+		positionBuffer = []
+	}
+}
+
 
 function mapValue(value, minIn, maxIn, minOut, maxOut){
 	return (value / (maxIn - minIn) )*(maxOut - minOut);
